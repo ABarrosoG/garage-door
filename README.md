@@ -1,7 +1,10 @@
 # Control board garage door.
-*Title: Control board garage door.*
-Título: Placa de control para puerta de garaje.
-Creación 14/08/2016   Revisado:    Autor: AntonioBG        Location: Seville - Spain
+		_Title: Control board garage door_
+Título: Placa de control para puerta de garaje<br /> 
+Creación: 14/08/2016   
+Revisado:    
+Autor: ABarrosoG        
+Location: Seville - Spain
 
 	 *Material:
 	  +Placa WeMos D1 R2
