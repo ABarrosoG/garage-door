@@ -2,7 +2,7 @@
  * **************************************************************************************************************
  *  Title: Control board garage door.
  *  Título: Placa de control para puerta de garaje.
- *  Creación 07/08/2016   Revisado://    Autor: AntonioBG        Location: Seville - Spain
+ *  Creación 07/08/2016   Revisado:    Autor: AntonioBG        Location: Seville - Spain
  *  Material: Placa WeMos D1 R2, FA 9V, Módulo 2 relés optoaclopados, una pequeña placa con conectores y 4 
  *              resistencias 10k a Pull-Down, miniFA 12v para alimentar la barrera infrarojos.
  *              Ya se disponía de motor con finales de carrera magnéticos.
@@ -10,39 +10,39 @@
  *            - Mando a distancia por smartphone with Blynk, control led de puerta abierta y aviso vía email en
  *                caso de que se encuentre abierta más de cinco minutos.
  *            - Mando a distancia RF.
- *            - 
+ * Ver 1.2:   - Implementar sensor barrera infrarojos.
  *  Objetivo: -Primero.- Realizar la apertura y cierre de puerta garaje controlando los sensores, debido a que la
  *                        anterior placa electrónica de control murió por desgaste electrónico.
  *            -Segundo.- Al hacer uso de un dispositivo WeMos. se le introducirá implementación en IOT sobre el 
  *                        servidor Blynk.
- *  
- *  Conexión:   -  
- * LICENCIA DE USO APACHE, si mejoras el programa o añades funcionalidades, por favor, compártelo!
- * 
- * https://github.com/electroduende/solar-control-arduino-ethernet/blob/master/LICENSE
- * ***************************************************************************************************************** */
+ *   
+* ***************************************************************************************************************** */
 
 //#define BLYNK_PRINT Serial    // Comentar esto para desactivar las impresiones y ahorrar espacio
 #include <ESP8266WiFi.h>
 #include <BlynkSimpleEsp8266.h>
 #include <Wire.h>
-#include <elapsedMillis.h>
-elapsedMillis timeElapsed;// timeElapsed permite el bucle sin paralizar el funcionamiento, al contrario de delay
-unsigned int interval = (1000 * 6) * 5;  // 5 MINUTOS  tiempo de espera
+#include <SimpleTimer.h>
+unsigned long currentTime;
+unsigned long lastRunTime;
+unsigned int interval = (1000 * 6) * 3;  // 3 MINUTOS  tiempo de espera
+unsigned int intervalParaliza = (1000 * 3);  // 30 segundos  tiempo de espera
 
 WidgetLED led1(V1); //led rojo si puerta abierta
 WidgetLED led2(V2); //led verde si puerta cerrada
 WidgetTerminal terminal(V3);
 
 bool puertaabierta = 0; //0 cerrada; 1 abierta
-bool mandoSW; // Estado de lectura del pin mando distancia
-int inPinVal ; // Virtual Pin Input
+bool mandoSWnow;// Estado de lectura del pin mando distancia
+bool paraliza;
 bool conectado = false;
+bool stateNow;
+bool statePrev;
 
 //CONSTANTES
-const char auth[] = "xxxxxxxxxxxx";
+const char auth[] = "xxxxxxxxxxxxxxxxxxxxxxxx";
 const char* ssid = "xxxxxxxx";
-const char* pass = "xxxxxxxx";
+const char* pass = "xxxxxxxxxxxxxxxx";
 #define FCC D1
 #define FCA D2
 #define Infra D5
@@ -66,21 +66,19 @@ void setup() {
   pinMode(Infra, INPUT);   // Sensor barrera infrarojos
   pinMode(MotorA, OUTPUT);  // Pin conectado a relé para giro motor apertura
   pinMode(MotorC, OUTPUT);  // Pin conectado a relé para giro motor cierre
-  pinMode(Mando, INPUT);   // Mando distancia
+  pinMode(Mando, INPUT_PULLUP);   // Mando distancia
 
   digitalWrite(FCC, LOW);
   digitalWrite(FCA, LOW);
   digitalWrite(Infra, LOW);
   digitalWrite(MotorA, HIGH);
   digitalWrite(MotorC, HIGH);
-  digitalWrite(Mando, LOW);
+  digitalWrite(Mando, HIGH);
 
   terminal.println(F("Blynk v" BLYNK_VERSION ": Device started"));
   terminal.flush();  // y limpia caché
   Serial.println(F("Blynk v" BLYNK_VERSION ": Device started"));
-  
 }
-
 
 // =================={ Virtual LEDs }=========
 void checkLeds() {
@@ -127,41 +125,54 @@ void cierraPuerta () {
     puertaabierta = 0;
     delay(300);
 }
-// ---------[ Widget Button using  virtual pin # 7 ]--------------------
-BLYNK_WRITE(V7) { //SIMULA EL BOTÓN DEL MANDO
-      if  ((param.asInt() == 1) && (puertaabierta == 1)) {
-            terminal.println("Telefono cierra");
-            cierraPuerta();
-      }
-      if  ((param.asInt() == 1) && (puertaabierta == 0)) {
-            terminal.println("Telefono abre");
+// ---------[ Widget Virtual Pin Abrir ]--------------------
+BLYNK_WRITE(V9) { //Abrir
+  paraliza = 1;
+  stateNow = param.asInt();
+      if  ((statePrev != stateNow) && (puertaabierta == 0)){
+            terminal.println("Phone_Open");
             abrePuerta();
       }
+  statePrev = stateNow;
+  delay(40);
+}
+// ---------[ Widget Virtual Pin cerrar ]--------------------
+BLYNK_WRITE(V10) { //Cerrar
+  stateNow = param.asInt();
+      if  ((statePrev != stateNow) && (puertaabierta == 1)){
+            terminal.println("Phone_Close");
+            cierraPuerta();
+      }
+  statePrev = stateNow;
+  delay(40);
+  paraliza = 0;
 }
 // ========{ Mando distancia }==================
 void mandoDistancia () {
-  mandoSW = digitalRead(Mando); // Lee estado mando
-  if ((mandoSW == LOW) && (puertaabierta == 0)) {
-    terminal.println("Mando coche abre");
-    abrePuerta();
-  }
-  mandoSW = digitalRead(Mando);
-  if ((mandoSW == LOW) && (puertaabierta == 1)) {
-    terminal.println("Mando coche cierra");
+  mandoSWnow = digitalRead(Mando); // Lee estado mando
+  if ((mandoSWnow == LOW) && (puertaabierta == 1) && (paraliza == 0)) {
+    terminal.println("Mando cierra");
     cierraPuerta();
+  }
+  mandoSWnow = digitalRead(Mando); // Lee estado mando
+  if ((mandoSWnow == LOW) && (puertaabierta == 0) && (paraliza == 0)) {
+    terminal.println("Mando abre");
+    abrePuerta();
   }
 }
 // ==============( Void Loop  ) ====================================
 void loop(){
   if (conectado) {Blynk.run();}
-
-  unsigned long currentMillis = millis();// Empezar a contar milisegundos
+    currentTime = millis();
   if (puertaabierta == 1){
-      if (timeElapsed > interval){
-      Blynk.email("xxxxxxxx@mail.com", "GARAJE ABIERTO!", "La puerta de garaje está abierta.");
-      timeElapsed = 0;  
+      if (currentTime - lastRunTime >= interval){
+        lastRunTime = currentTime;
+        Blynk.email("xxxxxxx@mail.com", "GARAJE ABIERTO!", "La puerta de garaje está abierta.");
       }
   }
-  mandoDistancia();
+  if ( paraliza == 0){
+        mandoDistancia();
+      }
+  delay(40);
   checkLeds();
 }
